@@ -43,6 +43,8 @@ class GlidePolar
   double mc;
   /** Inverse of MC setting (s/m) */
   double inv_mc;
+  /** altitude */
+  double altitude
 
   /** Clean ratio (1=clean, 0=100% bugs) */
   double bugs;
@@ -100,7 +102,7 @@ public:
    * @param _ballast Ballast ratio (default empty)
    */
   GlidePolar(const double _mc, const double _bugs=1,
-             const double _ballast=0) noexcept;
+             const double _ballast=0, const double _altitude=0) noexcept;
 
   /**
    * Constructs a GlidePolar object that is invalid.
@@ -273,6 +275,12 @@ public:
    * @param litres The new ballast setting (l or kg)
    */
   void SetBallastLitres(const double litres) noexcept;
+
+  /**
+   * Set altitude for altitude dependent shift of polar
+   * @param altitude
+   */
+  void SetAltitude(const double altitude) noexcept;
 
   /**
    * Retrieve ballast 
