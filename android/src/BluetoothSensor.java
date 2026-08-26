@@ -194,6 +194,32 @@ public final class BluetoothSensor
     listener.onHeartRateSensor(bpm);
   }
 
+  /**
+   * Parse a PLX measurement and report the blood oxygen saturation.
+   *
+   * Both the "PLX Spot-Check Measurement" and the "PLX Continuous
+   * Measurement" characteristic start with a flags byte followed by
+   * SpO2 and the pulse rate, each an IEEE-11073 16 bit SFLOAT, so the
+   * same code handles both.
+   */
+  private void readPLXMeasurement(BluetoothGattCharacteristic c) {
+    final Float spo2 = c.getFloatValue(BluetoothGattCharacteristic.FORMAT_SFLOAT,
+                                       1);
+    if (spo2 == null || spo2.isNaN())
+      /* the sensor reports "not available" while it is still
+         measuring */
+      return;
+
+    final int percent = Math.round(spo2);
+    if (percent <= 0 || percent > 100)
+      /* SFLOAT has several reserved values (NaN, NRes, infinity)
+         which Android may pass through as numbers; those are outside
+         the plausible range and get dropped here */
+      return;
+
+    listener.onBloodOxygenSensor(percent);
+  }
+
   static long toUnsignedLong(int x) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
       // Android 7 "Nougat" supports Java 8
@@ -215,6 +241,11 @@ public final class BluetoothSensor
     try {
       if (BluetoothUuids.HEART_RATE_MEASUREMENT_CHARACTERISTIC.equals(c.getUuid())) {
         readHeartRateMeasurement(c);
+      }
+
+      if (BluetoothUuids.PLX_CONTINUOUS_MEASUREMENT_CHARACTERISTIC.equals(c.getUuid()) ||
+          BluetoothUuids.PLX_SPOT_CHECK_MEASUREMENT_CHARACTERISTIC.equals(c.getUuid())) {
+        readPLXMeasurement(c);
       }
 
       if (BluetoothUuids.ENGINE_SENSORS_CHARACTERISTIC.equals(c.getUuid())) {
