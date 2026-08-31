@@ -414,7 +414,13 @@ DeviceListWidget::OnPaintItem(Canvas &canvas, const PixelRect rc,
 
   StaticString<256> buffer;
   const char *status;
-  if (flags.alive) {
+  if (config.IsDisabled()) {
+    /* ahead of the "alive" case on purpose: the data a device sent
+       before it was switched off stays valid for another ten seconds
+       (see NMEAInfo::Expire()), and reporting "Connected" for that
+       long makes it look as though disabling the device had failed */
+    status = _("Disabled");
+  } else if (flags.alive) {
     if (flags.location) {
       buffer = _("GPS fix");
     } else if (flags.gps) {
@@ -492,8 +498,6 @@ DeviceListWidget::OnPaintItem(Canvas &canvas, const PixelRect rc,
     }
 
     status = buffer;
-  } else if (config.IsDisabled()) {
-    status = _("Disabled");
   } else if (is_simulator() || !config.IsAvailable()) {
     status = _("N/A");
   } else if (flags.open) {
