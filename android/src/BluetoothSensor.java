@@ -37,11 +37,37 @@ public final class BluetoothSensor
   private final BluetoothDevice device;
 
   /**
+   * Maximum number of milliseconds close() waits for the disconnected
+   * state after calling BluetoothGatt.disconnect(), the same bound
+   * BleSerialPort uses.
+   */
+  private static final int DISCONNECT_TIMEOUT = 500;
+
+  /**
    * Assigned on the main thread, read on the Binder thread that
    * delivers the GATT callbacks, so the two have to agree on what
    * they see.
    */
   private volatile BluetoothGatt gatt;
+
+  /**
+   * Guards the assignment of #gatt against close(), so that a connect
+   * still queued on the Android main thread cannot hand out a client
+   * after close() has looked for one.
+   */
+  private final Object gattSync = new Object();
+
+  /**
+   * Set by close(); protected by #gattSync.
+   */
+  private boolean closed;
+
+  /**
+   * The raw GATT connection state, so that close() can wait for the
+   * disconnect it asked for.  Protected by itself.
+   */
+  private final Object gattStateSync = new Object();
+  private int gattState = BluetoothProfile.STATE_DISCONNECTED;
 
   private int state = STATE_LIMBO;
 
@@ -92,14 +118,25 @@ public final class BluetoothSensor
            * Change auto connect = false and remove transport hint, which
            * should be more stable and widespread supported.
            */
-          try {
-            gatt = device.connectGatt(context, false, BluetoothSensor.this);
-          } catch (SecurityException e) {
-            /* Android 12+: BLUETOOTH_CONNECT required; may be denied or revoked. */
-            submitError("Bluetooth connect not permitted");
-            return;
+          boolean permitted = true;
+
+          synchronized (gattSync) {
+            if (closed)
+              /* close() ran while this was still queued; connecting
+                 now would leave a client nobody releases */
+              return;
+
+            try {
+              gatt = device.connectGatt(context, false, BluetoothSensor.this);
+            } catch (SecurityException e) {
+              /* Android 12+: BLUETOOTH_CONNECT required; may be denied or revoked. */
+              permitted = false;
+            }
           }
-          if (gatt == null)
+
+          if (!permitted)
+            submitError("Bluetooth connect not permitted");
+          else if (gatt == null)
             submitError("Bluetooth GATT connect failed");
         }
       });
@@ -122,8 +159,40 @@ public final class BluetoothSensor
   @Override
   public void close() {
     safeDestruct.beginShutdown();
-    if (gatt != null)
+
+    final BluetoothGatt gatt;
+    synchronized (gattSync) {
+      closed = true;
+      gatt = this.gatt;
+    }
+
+    if (gatt != null) {
+      /* tell the peripheral to drop the link before the client is
+         released.  Releasing alone leaves the connection standing:
+         the sensor keeps the link and does not turn up in a new scan,
+         which looks to the pilot as though disabling the device had
+         done nothing (see #1836).  BleSerialPort does the same. */
+      gatt.disconnect();
+
+      synchronized (gattStateSync) {
+        final long waitUntil = System.currentTimeMillis() + DISCONNECT_TIMEOUT;
+
+        while (gattState != BluetoothProfile.STATE_DISCONNECTED) {
+          final long timeToWait = waitUntil - System.currentTimeMillis();
+          if (timeToWait <= 0)
+            break;
+
+          try {
+            gattStateSync.wait(timeToWait);
+          } catch (InterruptedException e) {
+            break;
+          }
+        }
+      }
+
       gatt.close();
+    }
+
     safeDestruct.finishShutdown();
   }
 
@@ -420,19 +489,27 @@ public final class BluetoothSensor
           return;
 
         try {
-          if (gatt != null) {
-            gatt.close();
-            gatt = null;
+          boolean permitted = true;
+
+          synchronized (gattSync) {
+            if (closed)
+              return;
+
+            if (gatt != null) {
+              gatt.close();
+              gatt = null;
+            }
+
+            try {
+              gatt = device.connectGatt(context, false, BluetoothSensor.this);
+            } catch (SecurityException e) {
+              permitted = false;
+            }
           }
 
-          try {
-            gatt = device.connectGatt(context, false, BluetoothSensor.this);
-          } catch (SecurityException e) {
+          if (!permitted)
             submitError("Bluetooth connect not permitted");
-            return;
-          }
-
-          if (gatt == null)
+          else if (gatt == null)
             submitError("Bluetooth GATT connect failed");
         } finally {
           safeDestruct.decrement();
@@ -452,6 +529,11 @@ public final class BluetoothSensor
          null case is the first callback racing the assignment in the
          constructor, and that one is ours. */
       return;
+
+    synchronized (gattStateSync) {
+      gattState = newState;
+      gattStateSync.notifyAll();
+    }
 
     if (BluetoothProfile.STATE_CONNECTED == newState &&
         BluetoothGatt.GATT_SUCCESS == status) {
