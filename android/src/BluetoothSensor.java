@@ -20,6 +20,7 @@ import android.content.Context;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 /**
  * Read Bluetooth LE sensor values and report them to a
@@ -29,6 +30,7 @@ public final class BluetoothSensor
   extends BluetoothGattCallback
   implements AndroidSensor
 {
+  private static final String DBG = "XCSDBG";
   private final SensorListener listener;
   private final SafeDestruct safeDestruct = new SafeDestruct();
 
@@ -93,6 +95,8 @@ public final class BluetoothSensor
     this.context = context;
     this.device = device;
 
+    Log.w(DBG, "ctor: enter, posting connect");
+
     if (Build.VERSION.SDK_INT >= 23){
       /**
        * Run GATT connect, discover etc. on main thread. If not,
@@ -106,8 +110,11 @@ public final class BluetoothSensor
            * Change auto connect = false and remove transport hint, which
            * should be more stable and widespread supported.
            */
+          Log.w(DBG, "ctor.runnable: running");
+
           try {
             gatt = device.connectGatt(context, false, BluetoothSensor.this);
+            Log.w(DBG, "ctor.runnable: connectGatt returned " + gatt);
           } catch (SecurityException e) {
             /* Android 12+: BLUETOOTH_CONNECT required; may be denied or revoked. */
             submitError("Bluetooth connect not permitted");
@@ -135,6 +142,8 @@ public final class BluetoothSensor
 
   @Override
   public void close() {
+    Log.w(DBG, "close(): called, gatt=" + gatt, new Throwable());
+
     safeDestruct.beginShutdown();
 
     final BluetoothGatt gatt = this.gatt;
@@ -453,12 +462,17 @@ public final class BluetoothSensor
    * another, so the close is not optional.
    */
   private void retryConnect() {
+    Log.w(DBG, "retryConnect: posting");
+
     new Handler(Looper.getMainLooper()).post(new Runnable() {
       @Override
       public void run() {
-        if (!safeDestruct.increment())
-          /* close() got there first */
+        if (!safeDestruct.increment()) {
+          Log.w(DBG, "retryConnect.runnable: SUPPRESSED, safeDestruct is shut down");
           return;
+        }
+
+        Log.w(DBG, "retryConnect.runnable: proceeding");
 
         try {
           if (gatt != null) {
@@ -485,6 +499,10 @@ public final class BluetoothSensor
   @Override
   public void onConnectionStateChange(BluetoothGatt gatt,
                                       int status, int newState) {
+    Log.w(DBG, "onConnectionStateChange: status=" + status +
+          " newState=" + newState + " gatt=" + gatt +
+          " current=" + this.gatt);
+
     final BluetoothGatt current = this.gatt;
     if (current != null && gatt != current)
       /* a disconnect still in flight from the client retryConnect()

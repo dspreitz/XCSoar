@@ -5,6 +5,8 @@
 #include "Class.hxx"
 #include "String.hxx"
 
+#include <android/log.h>
+
 namespace Java {
 
 static jmethodID close_method;
@@ -26,6 +28,8 @@ CloseCloseable(JNIEnv *env, jobject obj) noexcept
 GlobalCloseable::~GlobalCloseable() noexcept
 {
 	const jobject o = Get();
+	__android_log_print(ANDROID_LOG_WARN, "XCSDBG",
+			    "~GlobalCloseable o=%p", o);
 	if (o != nullptr)
 		CloseCloseable(Java::GetEnv(), o);
 }
@@ -33,6 +37,8 @@ GlobalCloseable::~GlobalCloseable() noexcept
 LocalCloseable::~LocalCloseable() noexcept
 {
 	const jobject o = Get();
+	__android_log_print(ANDROID_LOG_WARN, "XCSDBG",
+			    "~LocalCloseable o=%p -> calling close()", o);
 	if (o != nullptr)
 		CloseCloseable(GetEnv(), o);
 }

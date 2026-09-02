@@ -357,7 +357,9 @@ DeviceDescriptor::OpenBluetoothSensor()
   if (is_simulator())
     return true;
 
+  LogFormat("XCSDBG: OpenBluetoothSensor: before GlobalCloseable");
   java_sensor = new Java::GlobalCloseable(factory.OpenBluetoothSensor(config, *this));
+  LogFormat("XCSDBG: OpenBluetoothSensor: after GlobalCloseable");
   return true;
 #else
   return false;
