@@ -87,10 +87,12 @@ SatelliteDownloadGlue::Start(int _layer_index,
                              const GeoBitmap::TileData &_tile,
                              const BrokenDateTime &_frame_time) noexcept
 {
-  if (task.IsShuttingDown() || task.IsRunning())
+  if (task.IsShuttingDown() || task.IsRunning()) {
+    LogFmt("SATDBG swallowed x={} y={} (busy)", _tile.x, _tile.y);
     /* leave the running request alone: overwriting what it was asked
        for would georeference its image by this tile's corners */
     return;
+  }
 
   if (!_tile.IsValid() || !_frame_time.IsPlausible())
     return;
@@ -101,6 +103,7 @@ SatelliteDownloadGlue::Start(int _layer_index,
   path = nullptr;
   completion_error = {};
 
+  LogFmt("SATDBG fetch x={} y={}", _tile.x, _tile.y);
   task.Start(RunDownload(), BIND_THIS_METHOD(OnCompletion));
 }
 
@@ -523,7 +526,9 @@ SatelliteDownloadGlue::OnCompleteNotify() noexcept
   /* a tile that arrives but will not load must count as a failure,
      or NextMissingTile() would hand back the same tile for ever and
      we would download it in a loop */
-  if (InstallTile(path, layer_index, tile, frame_time))
+  const bool installed = InstallTile(path, layer_index, tile, frame_time);
+  LogFmt("SATDBG installed x={} y={} ok={}", tile.x, tile.y, installed);
+  if (installed)
     consecutive_failures = 0;
   else
     ++consecutive_failures;
@@ -583,15 +588,20 @@ SatelliteDownloadGlue::OnTimer() noexcept
 void
 EUMETView::ActivatePageOverlay(int layer_index) noexcept
 {
+  LogFmt("SATDBG activate layer={}", layer_index);
   auto *glue = GetSatelliteDownloadGlue();
   const auto *map = UIGlobals::GetMap();
-  if (glue == nullptr || map == nullptr || layer_index < 0)
+  if (glue == nullptr || map == nullptr || layer_index < 0) {
+    LogFmt("SATDBG bail-1 glue={} map={} layer={}",
+           glue != nullptr, map != nullptr, layer_index);
     return;
+  }
 
   active_layer = layer_index;
 
   const auto &basic = CommonInterface::Basic();
   if (!basic.location_available) {
+    LogFmt("SATDBG bail-2 no location");
     /* the block is centred on the aircraft, so without a fix there is
        nothing to centre it on -- but a fix is usually seconds away at
        startup, and waiting a minute to notice it is most of the delay
@@ -603,6 +613,7 @@ EUMETView::ActivatePageOverlay(int layer_index) noexcept
   const auto &layer = GetLayer(layer_index);
   const auto frame_time = FrameTime(layer, BrokenDateTime::NowUTC());
   if (!frame_time.IsPlausible()) {
+    LogFmt("SATDBG bail-3 frame_time implausible");
     glue->Schedule(true);
     return;
   }
@@ -618,6 +629,7 @@ EUMETView::ActivatePageOverlay(int layer_index) noexcept
      base tile, which rebuilds the block below. */
   const auto base = GetAircraftTile(basic.location, ChooseZoom(screen));
   if (!base.IsValid()) {
+    LogFmt("SATDBG bail-4 base tile invalid");
     glue->Schedule(true);
     return;
   }
@@ -638,11 +650,15 @@ EUMETView::ActivatePageOverlay(int layer_index) noexcept
   }
 
   if (glue->IsRunning() || wanted.empty()) {
+    LogFmt("SATDBG bail-5 running={} wanted={}",
+           glue->IsRunning(), wanted.size());
     glue->Schedule(true);
     return;
   }
 
   if (consecutive_failures >= wanted.size()) {
+    LogFmt("SATDBG bail-6 failures={} wanted={}",
+           consecutive_failures, wanted.size());
     /* the whole block failed in a row; back off to the slow tick
        rather than spin on a link or a layer that is not answering */
     glue->Schedule(false);
@@ -661,6 +677,7 @@ EUMETView::ActivatePageOverlay(int layer_index) noexcept
     return;
   }
 
+  LogFmt("SATDBG start tile z={} x={} y={}", next.zoom, next.x, next.y);
   glue->Start(layer_index, next, frame_time);
 }
 
