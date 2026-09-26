@@ -123,8 +123,18 @@ CuSonde::UpdateMeasurements(const NMEAInfo &basic,
   if (abs(level - last_level) == 0)
     return;
 
-  // calculate ground height
-  ground_height = calculated.altitude_agl;
+  /* The dry adiabat starts at the ground, so this has to be the
+     terrain elevation, as the field's documentation says -- not the
+     aircraft's height above it.  With the complement in here, h_agl
+     below came out as level * HEIGHT_STEP - (altitude - terrain),
+     which is the terrain elevation for every level: the adiabat was
+     flat, the thermal index compared the profile against a constant,
+     and the cloud base was usually never found.  Without a terrain
+     file the elevation is unknown; the last known value (zero after
+     Reset()) is kept rather than replaced by a zero that would mean
+     "mean sea level". */
+  if (calculated.terrain_valid)
+    ground_height = calculated.terrain_altitude;
 
   // if (going up)
   if (level > last_level) {
