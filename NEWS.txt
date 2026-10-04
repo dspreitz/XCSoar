@@ -225,6 +225,9 @@ Version 7.46 - not yet released
   - fix the GPS line (HFGPS) of an IGC file naming device A instead
     of the device that supplies the GPS fix when the logger starts
     #3180
+  - keep the QNH of an LXNAV S-series vario from creeping by about
+    0.15 hPa on every reconnect: read it the way the vario computes it,
+    and take the exact value it sends on a change #3261
 * dialogs
   - show each repository file as its name and its description, and
     download every ticked file together; Countries and Search narrow
