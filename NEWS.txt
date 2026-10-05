@@ -227,6 +227,9 @@ Version 7.46 - not yet released
   - wait for the LXNAV product reply before choosing a flight-list
     protocol, so an S-series logger is not sent Colibri commands
     while it is still identifying
+  - fix a polar received from an LXNAV vario being saved to the plane
+    profile with positive sink rates, which made the profile invalid
+    #3269
   - accept an NMEA checksum only as exactly two hexadecimal digits, as
     NMEA 0183 requires; a space, sign or "0x" before the digits, or a
     single digit, used to pass #2127
