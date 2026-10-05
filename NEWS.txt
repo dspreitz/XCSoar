@@ -233,6 +233,9 @@ Version 7.46 - not yet released
   - fix the GPS line (HFGPS) of an IGC file naming device A instead
     of the device that supplies the GPS fix when the logger starts
     #3180
+  - show only the start time in the flight download list when the
+    logger did not record when a flight ended, instead of 00:00 (LXNAV
+    S10)
 * dialogs
   - show each repository file as its name and its description, and
     download every ticked file together; Countries and Search narrow
@@ -335,6 +338,8 @@ Version 7.46 - not yet released
   - fix pictures named by image= in a waypoint details file not showing
     for waypoints loaded from a .cupx file; they were looked for inside
     the archive instead of the data directory #3250
+  - show the title of the flight download list in the selected
+    language
 * infoboxen
   - add a Fixed text InfoBox whose title, value and comment are set
     by tapping it on the map, for labelling a page or as a separator
