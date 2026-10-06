@@ -252,6 +252,8 @@ Version 7.46 - not yet released
   - keep the QNH of an LXNAV S-series vario from creeping by about
     0.15 hPa on every reconnect: read it the way the vario computes it,
     and take the exact value it sends on a change #3261
+  - note in an IGC file when another device takes over the GPS fix
+    during the flight, as an L record after its first fix #3180
 * dialogs
   - show each repository file as its name and its description, and
     download every ticked file together; Countries and Search narrow
