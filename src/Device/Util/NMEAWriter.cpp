@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <string>
+
 void
 PortWriteNMEA(Port &port, const char *line, OperationEnvironment &env)
 {
@@ -19,10 +21,17 @@ PortWriteNMEA(Port &port, const char *line, OperationEnvironment &env)
      parameter? */
   static constexpr auto timeout = std::chrono::seconds(1);
 
-  port.Write('$');
-  port.FullWrite(line, env, timeout);
+  /* One write for the whole sentence.  Three of them -- '$', body,
+     checksum -- can leave the port as three packets, and a Bluetooth
+     SPP device with a short buffer (LXNAV S100, #3229) has been seen to
+     do better when a command arrives in one piece. */
+  char checksum[8];
+  snprintf(checksum, sizeof(checksum), "*%02X\r\n", NMEAChecksum(line));
 
-  char checksum[16];
-  sprintf(checksum, "*%02X\r\n", NMEAChecksum(line));
-  port.FullWrite(checksum, env, timeout);
+  std::string sentence;
+  sentence.reserve(strlen(line) + 1 + strlen(checksum));
+  sentence += '$';
+  sentence += line;
+  sentence += checksum;
+  port.FullWrite(std::string_view{sentence}, env, timeout);
 }
