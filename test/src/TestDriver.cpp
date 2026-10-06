@@ -27,6 +27,7 @@
 #include "Device/Driver/LX/Internal.hpp"
 #include "Device/Driver/LX/LXNavDeclare.hpp"
 #include "Device/Driver/LX/NanoLogger.hpp"
+#include "NMEA/Checksum.hpp"
 #include "Device/Driver/LX_Eos.hpp"
 #include "Device/Driver/Larus.hpp"
 #include "Device/Driver/Leonardo.hpp"
@@ -3665,6 +3666,122 @@ TestLXNanoLogbook()
                                  "07:35:25", info));
 }
 
+/**
+ * The QNH from an S series vario (#3261): the offset in $LXWP3 is
+ * linear in the QNH, and $PLXV0,QNH,W carries it exactly.  Sentences
+ * as an S10 (firmware 9.41) sent them.
+ */
+static void
+TestLXNAVQNH()
+{
+  NullPort null;
+  Device *device = lx_driver.CreateOnPort(dummy_config, null);
+  LXDevice &lx_device = *(LXDevice *)device;
+  lx_device.ResetDeviceDetection();
+
+  NMEAInfo basic;
+  basic.Reset();
+  basic.clock = TimeStamp{FloatDuration{1}};
+
+  ok1(device->ParseNMEA("$LXWP1,NINC,30309,9.41,08*0B", basic));
+  ok1(lx_device.IsSVario());
+
+  /* QNH 1020 and 1010 hPa set on the vario */
+  ok1(device->ParseNMEA("$LXWP3,188,0,2.0,,0,20,5.0,0.5,0,100,-10.0,"
+                        "Kestrel 17m,,*15", basic));
+  ok1(fabs(basic.settings.qnh.GetHectoPascal() - 1020) < 0.02);
+
+  basic.Reset();
+  basic.clock = TimeStamp{FloatDuration{1}};
+  ok1(device->ParseNMEA("$LXWP3,-91,0,2.0,,0,20,5.0,0.5,0,100,-10.0,"
+                        "Kestrel 17m,,*01", basic));
+  ok1(fabs(basic.settings.qnh.GetHectoPascal() - 1010) < 0.02);
+
+  basic.Reset();
+  basic.clock = TimeStamp{FloatDuration{1}};
+  ok1(device->ParseNMEA("$PLXV0,QNH,W,102000*0D", basic));
+  ok1(basic.settings.qnh_available);
+  ok1(equals(basic.settings.qnh.GetHectoPascal(), 1020));
+
+  /* the order the S10 sends them in: the offset first, then the
+     exact value, which must replace the one derived from the offset
+     although they are less than 0.5 hPa apart */
+  basic.Reset();
+  basic.clock = TimeStamp{FloatDuration{1}};
+  ok1(device->ParseNMEA("$LXWP3,188,0,2.0,,0,20,5.0,0.5,0,100,-10.0,Kestrel 17m,,*15", basic));
+  ok1(device->ParseNMEA("$PLXV0,QNH,W,102000*0D", basic));
+  ok1(basic.settings.qnh.GetHectoPascal() == 1020);
+
+  /* an implausible value does not take the valid one away */
+  ok1(device->ParseNMEA("$PLXV0,QNH,W,0*3E", basic));
+  ok1(basic.settings.qnh_available);
+  ok1(basic.settings.qnh.GetHectoPascal() == 1020);
+
+  /* not a number: never a QNH, whatever -ffast-math assumes */
+  basic.Reset();
+  basic.clock = TimeStamp{FloatDuration{1}};
+  device->ParseNMEA("$PLXV0,QNH,W,nan*6F", basic);
+  device->ParseNMEA("$PLXV0,QNH,W,inf*6F", basic);
+  ok1(!basic.settings.qnh_available);
+
+  /* no creep: the QNH XCSoar sends back (in 0.01 hPa) makes the vario
+     report the same offset again */
+  bool stable = true;
+  for (int feet = -900; feet <= 900; ++feet) {
+    basic.Reset();
+    basic.clock = TimeStamp{FloatDuration{1}};
+
+    const auto body =
+      fmt::format("LXWP3,{},0,2.0,,0,20,5.0,0.5,0,100,-10.0,,,", feet);
+    const auto sentence =
+      fmt::format("${}*{:02X}", body, NMEAChecksum(body.c_str()));
+    if (!device->ParseNMEA(sentence.c_str(), basic)) {
+      stable = false;
+      continue;
+    }
+
+    const double sent =
+      std::round(basic.settings.qnh.GetHectoPascal() * 100) / 100;
+    if (std::lround((sent - 1013.25) * 8.5 / 0.3048) != feet)
+      stable = false;
+  }
+  ok1(stable);
+
+  delete device;
+}
+
+/**
+ * PutQNH() does not send an S series vario the QNH it reported itself
+ * (#3261): that could only round it to what the $LXWP3 offset carries.
+ */
+static void
+TestLXNAVQNHEcho()
+{
+  DumpPort dump;
+  Device *device = lx_driver.CreateOnPort(dummy_config, dump);
+  LXDevice &lx_device = *(LXDevice *)device;
+  lx_device.ResetDeviceDetection();
+
+  NMEAInfo basic;
+  basic.Reset();
+  basic.clock = TimeStamp{FloatDuration{1}};
+  ok1(device->ParseNMEA("$LXWP1,NINC,30309,9.41,08*0B", basic));
+  ok1(device->ParseNMEA("$LXWP3,188,0,2.0,,0,20,5.0,0.5,0,100,-10.0,Kestrel 17m,,*15", basic));
+
+  NullOperationEnvironment env;
+
+  /* the value XCSoar adopted from that offset goes nowhere */
+  dump.Clear();
+  ok1(device->PutQNH(basic.settings.qnh, env));
+  ok1(dump.FindContaining("PLXV0,QNH,W") == nullptr);
+
+  /* a QNH the pilot set in XCSoar does */
+  ok1(device->PutQNH(AtmosphericPressure::HectoPascal(1013.25), env));
+  ok1(dump.FindContaining("PLXV0,QNH,W,101325") != nullptr);
+
+  delete device;
+}
+
 int main()
 {
   const auto data_path = MakeTestDriverDataPath();
@@ -3686,7 +3803,9 @@ int main()
              + 24 /* TrafficExtensionsWire */
              + 42 /* LK8EX1 */
              + 30 /* LXV7PolarWrite */
-             + 9 /* LXNanoLogbook */);
+             + 9 /* LXNanoLogbook */
+             + 17 /* LXNAVQNH */
+             + 6 /* LXNAVQNHEcho */);
   TestGeneric();
   TestTasman();
   TestLK8EX1();
@@ -3760,6 +3879,8 @@ int main()
   TestFlarmTrafficBuilder();
   TestTrafficExtensionsWire();
   TestLXNanoLogbook();
+  TestLXNAVQNH();
+  TestLXNAVQNHEcho();
 
   DeinitialiseDataPath();
   return exit_status();
