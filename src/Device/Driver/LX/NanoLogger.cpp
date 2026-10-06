@@ -227,8 +227,8 @@ ReadFilename(NMEAInputLine &line, RecordedFlightInfo &info)
   return info.internal.lx.nano_filename[0] != 0;
 }
 
-static bool
-ParseLogbookContent(const char *_line, RecordedFlightInfo &info)
+bool
+Nano::ParseLogbookContent(const char *_line, RecordedFlightInfo &info)
 {
   NMEAInputLine line(_line);
   line.Skip();
@@ -240,6 +240,11 @@ ParseLogbookContent(const char *_line, RecordedFlightInfo &info)
       !ReadTime(line, info.start_time) ||
       !ReadTime(line, info.end_time))
     return false;
+
+  /* An S10 (firmware 9.41) reports 00:00:00 as the end of nearly
+     every flight: the end was not recorded, it is not midnight */
+  if (info.end_time == BrokenTime::Midnight())
+    info.end_time = BrokenTime::Invalid();
 
   /* the file size; old firmware versions may not send it */
   unsigned size;
@@ -263,7 +268,7 @@ ReadLogbookContents(PortNMEAReader &reader, RecordedFlightList &flight_list,
       return false;
 
     RecordedFlightInfo info;
-    if (ParseLogbookContent(line, info) && !flight_list.full())
+    if (Nano::ParseLogbookContent(line, info) && !flight_list.full())
       flight_list.append() = info;
   }
 
