@@ -59,6 +59,7 @@ ToBrokenTime(int64_t value) noexcept
 static AbsoluteFlightTimes
 Scan(Path path, OperationEnvironment *operation)
 {
+  /* lizard CI test, not for merging */
   FileLineReaderA reader(path);
   IGCExtensions extensions;
   extensions.clear();
