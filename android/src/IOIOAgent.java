@@ -31,6 +31,16 @@ final class IOIOAgent extends Thread {
   private boolean openFlag, enabledFlag, shutdownFlag;
 
   /**
+   * The number of connect attempts that failed in a row.  It delays
+   * the next attempt, so a connection that fails at once (an IOIO
+   * with incompatible firmware, a socket port in use) does not keep
+   * a CPU core busy.
+   */
+  private int failures;
+
+  private static final long MAX_RETRY_DELAY_MS = 30000;
+
+  /**
    * The IOIO connection that is currently being established.  It may
    * be used by the client thread to cancel the connection.
    */
@@ -210,10 +220,18 @@ final class IOIOAgent extends Thread {
         /* there is no connection: wait until Thread.interrupt()
            gets called */
         synchronized(this) {
-          if (enabledFlag)
-            /* don't block here, we should instead open a new
-               connection */
+          if (enabledFlag) {
+            if (failures == 0)
+              /* don't block here, we should instead open a new
+                 connection */
+              return;
+
+            /* the last attempt failed: wait before the next one;
+               enable() and wakeUp() cut this short */
+            wait(Math.min(1000L << Math.min(failures - 1, 5),
+                          MAX_RETRY_DELAY_MS));
             return;
+          }
 
           /* we're not actually waiting for an Object.notify() call,
              this is just a dummy call to make this thread idle and
@@ -236,8 +254,13 @@ final class IOIOAgent extends Thread {
                            !enabledFlag)) {
         synchronousClose(ioio);
         ioio = null;
-      } else if (ioio == null && enabledFlag && !shutdownFlag)
+      } else if (ioio == null && enabledFlag && !shutdownFlag) {
         ioio = synchronousOpen();
+        if (ioio != null)
+          failures = 0;
+        else if (enabledFlag && !shutdownFlag)
+          ++failures;
+      }
 
       if (shutdownFlag) {
         synchronousClose(ioio);
