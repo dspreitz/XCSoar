@@ -29,6 +29,14 @@ final class IOIOHelper implements IOIOConnectionHolder,
 
   private IOIOMultiAgent agent;
 
+  /**
+   * Serialises agent.enable() and agent.disable() with the listener
+   * lists.  They must not be called while holding this object's
+   * monitor: the agent thread holds the IOIOAgent monitor when it
+   * calls onIOIOConnect(), which needs this object's monitor.
+   */
+  private final Object agentLock = new Object();
+
   private IOIO ioio_;
 
   /**
@@ -183,10 +191,14 @@ final class IOIOHelper implements IOIOConnectionHolder,
     return true;
   }
 
-  @Override public synchronized void addListener(IOIOConnectionListener l) {
-    closedListeners.add(l);
+  @Override public void addListener(IOIOConnectionListener l) {
+    synchronized(agentLock) {
+      synchronized(this) {
+        closedListeners.add(l);
+      }
 
-    agent.enable();
+      agent.enable();
+    }
 
     for (IOIOConnectionBootstrap bootstrap : bootstraps) {
       try {
@@ -198,17 +210,24 @@ final class IOIOHelper implements IOIOConnectionHolder,
     }
   }
 
-  @Override public synchronized void removeListener(IOIOConnectionListener l) {
-    if (openListeners.remove(l))
-      /* this listener thinks the IOIO connection is established;
-         invoke the onIOIODisconnect() method */
-      l.onIOIODisconnect(ioio_);
-    else
-      /* no method call necessary */
-      closedListeners.remove(l);
+  @Override public void removeListener(IOIOConnectionListener l) {
+    synchronized(agentLock) {
+      final boolean inUse;
+      synchronized(this) {
+        if (openListeners.remove(l))
+          /* this listener thinks the IOIO connection is established;
+             invoke the onIOIODisconnect() method */
+          l.onIOIODisconnect(ioio_);
+        else
+          /* no method call necessary */
+          closedListeners.remove(l);
 
-    if (!isInUse())
-      agent.disable();
+        inUse = isInUse();
+      }
+
+      if (!inUse)
+        agent.disable();
+    }
   }
 
   @Override
