@@ -1255,10 +1255,12 @@ ActivatePageOverlay(std::string_view layer_id, bool first_enter,
   requested_time = frame_time;
   active = true;
   suspended = false;
-  /* A different layer is a different picture. A new frame keeps the
-     old one up until its squares are replaced. */
-  if (changed)
+  /* A different layer is a different picture with its own scale. A
+     new frame keeps the old one up until its squares are replaced. */
+  if (changed) {
     ClearTiles();
+    InstallLegend();
+  }
   if (first_enter)
     catalog_valid = false;
 
