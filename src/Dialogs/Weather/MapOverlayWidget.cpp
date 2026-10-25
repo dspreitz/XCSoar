@@ -5,6 +5,7 @@
 #include "Dialogs/CoFunctionDialog.hpp"
 #include "Dialogs/Error.hpp"
 #include "UIGlobals.hpp"
+#include "Look/DialogLook.hpp"
 #include "ui/canvas/Bitmap.hpp"
 #include "ui/canvas/Canvas.hpp"
 #include "Form/ButtonPanel.hpp"
@@ -156,9 +157,18 @@ private:
     return FindItemByName(ob->GetLabel());
   }
 
+  /**
+   * "Use" makes no sense on the overlay that is already shown.
+   */
+  void UpdateUseButton() noexcept {
+    use_button->SetEnabled(!items.empty() &&
+                           int(GetList().GetCursorIndex()) != active_index);
+  }
+
   void UpdateActiveIndex() {
     active_index = FindActiveIndex();
     disable_button->SetEnabled(active_index >= 0);
+    UpdateUseButton();
     GetList().Invalidate();
   }
 
@@ -212,28 +222,42 @@ protected:
   /* virtual methods from ListItemRenderer */
   void OnPaintItem(Canvas &canvas, PixelRect rc,
                    unsigned i) noexcept override {
-    if (int(i) == active_index) {
-      rc.left = row_renderer.DrawColumn(canvas, rc, " > ");
-      rc.right = row_renderer.DrawRightColumn(canvas, rc, " < ");
-    }
+    const bool active = int(i) == active_index;
+    const auto &look = UIGlobals::GetDialogLook();
 
     if (const int layer = items[i].satellite_layer;
-        layer >= 0 && EUMETView::IsLayerEmpty(layer))
+        layer >= 0 && EUMETView::IsLayerEmpty(layer)) {
       /* the server answered but the product had nothing to draw here:
          say so, rather than leaving an empty map to be read as a slow
-         download */
+         download.  The entry stays usable, because the next frame
+         (after sunrise, for a visible channel) may have data. */
+      if (i != GetList().GetCursorIndex())
+        /* ListControl sets the text colour for every row; the
+           selected row keeps its own for contrast */
+        canvas.SetTextColor(look.button.disabled.color);
+
       rc.right = row_renderer.DrawRightColumn(canvas, rc, _("no data"));
+    }
+
+    if (active)
+      canvas.Select(*look.list.font_bold);
 
     TextListWidget::OnPaintItem(canvas, rc, i);
+
+    if (active)
+      /* ListControl selects the regular font only once for all
+         rows */
+      canvas.Select(*look.list.font);
   }
 
   /* virtual methods from ListCursorHandler */
   void OnCursorMoved(unsigned i) noexcept override {
     UpdatePreview(items[i].path);
+    UpdateUseButton();
   }
 
-  bool CanActivateItem([[maybe_unused]] unsigned i) const noexcept override {
-    return true;
+  bool CanActivateItem(unsigned i) const noexcept override {
+    return int(i) != active_index;
   }
 
   void OnActivateItem(unsigned i) noexcept override {
@@ -320,9 +344,6 @@ WeatherMapOverlayListWidget::UpdateList()
   ListControl &list_control = GetList();
   list_control.SetLength(n);
   list_control.Invalidate();
-
-  const bool empty = items.empty();
-  use_button->SetEnabled(!empty);
 
   /* "Update" re-downloads; that is possible for the pc_met overlays
      only with credentials, but always for the radar composite */
@@ -490,10 +511,8 @@ WeatherMapOverlayListWidget::SetOverlay(Path path, const GeoBounds &bounds,
 void
 WeatherMapOverlayListWidget::UseClicked(unsigned i)
 {
-  if (int(i) == active_index) {
-    DisableClicked();
+  if (int(i) == active_index)
     return;
-  }
 
   const char *label = nullptr;
   auto &item = items[i];

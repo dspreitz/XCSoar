@@ -682,7 +682,8 @@ The layer is listed as \emph{Radar (EUMETNET OPERA)} on the
 ``Overlay'' page of the
 \menulabelr{\bmenug{Info}\blink\bmenug{Weather}} \bmenug{Info} menu.
 Select it and press \bmenug{Use}; \bmenug{Disable} switches it off
-again.
+again.  The layer currently drawn on the map is shown in bold, and
+\bmenug{Use} is greyed out while it is selected.
 
 Selecting it draws the part of the newest composite covering the area
 the map is currently showing, so pan and zoom the map first and select
@@ -778,6 +779,12 @@ The products offered are:
 \item[Rapid scan natural colour] renewed every five minutes rather
   than every ten, over Europe.
 \end{description}
+
+The visible light products show nothing at night.  When a product
+has served nothing but empty tiles for the area around the aircraft,
+the ``Overlay'' page marks it \emph{no data} and greys it out.  It
+can still be selected, so the next frame is fetched when one is
+published.
 
 The imagery is fetched as a block of five by five tiles centred on
 the aircraft.  At the scales a glider is flown at, a tile is about
