@@ -12,6 +12,7 @@
 #include "co/Task.hxx"
 #include "lib/curl/Global.hxx"
 #include "net/State.hpp"
+#include "util/Exception.hxx"
 #include "util/Macros.hpp"
 
 #include <algorithm>
@@ -31,6 +32,9 @@ static constexpr const char *DEVICE_ID = "xcsoar";
  * requests per minute.
  */
 static constexpr std::chrono::seconds MIN_INTERVAL{5};
+
+/** How long the server blocks a pilot who sent too many requests. */
+static constexpr std::chrono::minutes RATE_LIMIT_PAUSE{20};
 
 static VehicleType
 MapVehicleTypeToLivetrack24(Settings::VehicleType vt)
@@ -72,6 +76,9 @@ Glue::SetSettings(const Settings &_settings)
     /* wait for the current job to finish */
     task.Cancel();
 
+    /* a cancelled request may have reached the server already */
+    PostponeNextRequest(std::chrono::steady_clock::now() + MIN_INTERVAL);
+
     /* now it's safe to access these variables */
     settings = _settings;
     session = {};
@@ -96,6 +103,12 @@ Glue::OnTimer(const MoreData &basic, const DerivedInfo &calculated)
 
   if (settings.username.empty() || settings.password.empty())
     /* the server only takes tracks of a logged-in pilot */
+    return;
+
+  if (std::chrono::steady_clock::now() < next_request.load())
+    /* the server measures the time between two requests as they
+       arrive, so a slow request must not shorten the gap; after the
+       rate limit, a request would only extend the server's block */
     return;
 
   if (GetNetState() == NetState::DISCONNECTED)
@@ -132,7 +145,6 @@ Glue::OnTimer(const MoreData &basic, const DerivedInfo &calculated)
     ? (unsigned)std::lround(basic.track.AsBearing().Degrees()) % 360
     : 0u;
 
-  last_flying = flying;
   flying = calculated.flight.flying;
 
   task.Start(Tick(settings), BIND_THIS_METHOD(OnCompletion));
@@ -143,9 +155,15 @@ Glue::Tick(Settings settings)
 {
   assert(settings.enabled);
 
+  if (std::chrono::steady_clock::now() < next_request.load())
+    /* OnTimer() may have seen the previous task finish before
+       OnCompletion() stored the new time */
+    co_return;
+
   if (!flying) {
-    if (last_flying && session.IsDefined()) {
-      /* landing: end tracking session */
+    if (session.IsDefined()) {
+      /* landing: end tracking session; this does not depend on the
+         previous fix, so a Tick() that ended early cannot lose it */
       const Session old_session = std::exchange(session, Session{});
       last_timestamp = {};
       co_await client.EndTracking(old_session, packet_id);
@@ -211,8 +229,26 @@ Glue::Tick(Settings settings)
 void
 Glue::OnCompletion(std::exception_ptr error) noexcept
 {
-  if (error)
+  auto next = std::chrono::steady_clock::now() + MIN_INTERVAL;
+
+  if (error) {
     LogError(error, "LiveTrack24 error");
+
+    if (FindNested<RateLimitError>(error) != nullptr)
+      next = std::chrono::steady_clock::now() + RATE_LIMIT_PAUSE;
+  }
+
+  PostponeNextRequest(next);
+}
+
+void
+Glue::PostponeNextRequest(std::chrono::steady_clock::time_point t) noexcept
+{
+  /* only postpone, so a task that Tick() ended early cannot shorten
+     a pause; OnCompletion() and SetSettings() (after Cancel()) never
+     run at the same time, so load() and store() do not race */
+  if (t > next_request.load())
+    next_request.store(t);
 }
 
 } // namespace LiveTrack24
